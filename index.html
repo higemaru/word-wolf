@@ -1,0 +1,309 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top">
+  <title id="page-title">ワードウルフ オンライン</title>
+  <style>
+    body { font-family: 'Helvetica Neue', Arial, sans-serif; text-align: center; padding: 20px; background-color: #f0f2f5; color: #333; }
+    .card { background: white; padding: 30px; border-radius: 20px; margin: 20px auto; max-width: 500px; box-shadow: 0 10px 25px rgba(0,0,0,0.05); }
+    h1 { color: #1a73e8; margin-bottom: 30px; }
+    .btn { padding: 14px 28px; font-size: 16px; cursor: pointer; border-radius: 12px; border: none; background: #1a73e8; color: white; margin: 8px; font-weight: bold; transition: 0.2s; min-width: 120px; }
+    .btn:hover { opacity: 0.8; transform: translateY(-1px); }
+    .btn-danger { background: #ea4335; }
+    .btn-secondary { background: #5f6368; }
+    .hidden { display: none !important; }
+    #timer { font-size: 4em; font-weight: bold; margin: 10px 0; font-variant-numeric: tabular-nums; }
+    
+    .warning { color: #ea4335; animation: blink 0.5s infinite; }
+    @keyframes blink { 0% { opacity: 1; } 50% { opacity: 0.4; } 100% { opacity: 1; } }
+    
+    .result-item { text-align: left; border-bottom: 1px solid #eee; padding: 15px; font-size: 1.1em; }
+    .wolf-row { background-color: #fce8e6; color: #ea4335; border-radius: 10px; font-weight: bold; }
+    code { background: #eee; padding: 2px 6px; border-radius: 4px; }
+    #vote-options .btn { display: block; width: 80%; margin: 10px auto; }
+    
+    /* 通信中オーバーレイ */
+    #loading-overlay {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(255, 255, 255, 0.6);
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      z-index: 9999;
+      backdrop-filter: blur(2px);
+    }
+    .spinner {
+      width: 40px;
+      height: 40px;
+      border: 4px solid #f3f3f3;
+      border-top: 4px solid #1a73e8;
+      border-radius: 50%;
+      animation: spin 1s linear infinite;
+      margin-bottom: 10px;
+    }
+    @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+    button:disabled { opacity: 0.5; cursor: not-allowed; }
+  </style>
+</head>
+<body>
+  <div id="loading-overlay" class="hidden">
+    <div class="spinner"></div>
+    <div style="font-weight: bold; color: #1a73e8;">処理中...</div>
+  </div>
+
+  <h1 id="game-title">ワードウルフ オンライン</h1>
+
+  <div id="state-loading" class="card">
+    <p>サーバーに接続中...</p>
+  </div>
+
+  <div id="state-unauthorized" class="hidden card">
+    <h2 style="color: #ea4335;">アクセス権限がありません</h2>
+    <p>Players シートにこのアドレスを登録してください：</p>
+    <code id="user-email"></code>
+  </div>
+
+  <div id="state-waiting" class="hidden card">
+    <p>全員が集まるまでお待ちください</p>
+    <div class="admin-only" style="margin-bottom: 10px;">
+      <label for="wolf-count" id="wolf-count-label">人狼の数：</label>
+      <select id="wolf-count" style="padding: 5px; border-radius: 5px;">
+        <option value="1">1名</option>
+        <option value="2">2名</option>
+        <option value="3">3名</option>
+      </select>
+    </div>
+    <button class="btn admin-only" onclick="setupWithWolfCount()">お題を配布する</button>
+    <p class="user-only" style="color:#666;">進行役が準備しています...</p>
+  </div>
+
+  <div id="state-distributing" class="hidden card">
+    <div id="word-area">
+      <button class="btn" onclick="showWord()">ワードを確認する</button>
+    </div>
+    <div id="word-display" class="hidden">
+      あなたのワードは:<br>
+      <h2 id="my-word" style="color: #1a73e8;"></h2>
+      <p style="font-size: 0.9em; color:#666;">確認済み人数: <span id="check-count"></span></p>
+    </div>
+    <hr>
+    <button class="btn admin-only" onclick="run('startGame')">ゲーム開始！</button>
+  </div>
+
+  <div id="state-started" class="hidden card">
+    <div id="timer">00:00</div>
+    <p id="time-up-msg" class="hidden" style="color: #ea4335; font-weight: bold;">時間切れ！</p>
+    <hr>
+    <p>あなたのワード: <b id="my-word-fixed"></b></p>
+    <button class="btn admin-only" onclick="run('startVoting')">投票を開始する</button>
+  </div>
+
+  <div id="state-voting" class="hidden card">
+    <h2>投票タイム！</h2>
+    <p id="vote-instruction">人狼だと思う人を選んでください</p>
+    <p style="color: #ea4335; font-size: 0.9em; font-weight: bold;">
+      ※一度投票すると変更できません
+    </p>
+    <div id="vote-options"></div>
+    <hr>
+    <div id="vote-status" style="text-align: left; font-size: 0.9em;">
+      <strong>現在の得票数:</strong>
+      <div id="vote-tally-list"></div>
+    </div>
+    <button class="btn btn-danger admin-only" onclick="run('revealAnswer')" style="margin-top:20px;">正解を表示する</button>
+  </div>
+
+  <div id="state-revealed" class="hidden card">
+    <h2>結果発表</h2>
+    <div id="result-list"></div>
+    <hr>
+    <button class="btn btn-secondary admin-only" onclick="run('resetGame')">次のゲームへ</button>
+  </div>
+
+  <audio id="snd-tick" src="https://actions.google.com/sounds/v1/alarms/beep_short.ogg"></audio>
+  <audio id="snd-alarm" src="https://actions.google.com/sounds/v1/alarms/alarm_clock_short.ogg"></audio>
+
+  <script>
+    let targetEndTime = null;
+    let currentState = "";
+    let lastSecond = null;
+    let isOperating = false;
+
+    // タイマー制御
+    setInterval(() => {
+      if (currentState === 'STARTED' && targetEndTime) {
+        const now = new Date().getTime();
+        const remaining = Math.max(0, Math.floor((targetEndTime - now) / 1000));
+        const m = Math.floor(remaining / 60);
+        const s = remaining % 60;
+        const timerEl = document.getElementById('timer');
+        if (timerEl) {
+          timerEl.innerText = `${m}:${s.toString().padStart(2, '0')}`;
+          if (remaining <= 10 && remaining > 0) {
+            timerEl.classList.add('warning');
+            if (lastSecond !== remaining) document.getElementById('snd-tick').play().catch(()=>{});
+          } else if (remaining === 0) {
+            timerEl.classList.add('warning');
+            document.getElementById('time-up-msg').classList.remove('hidden');
+            if (lastSecond > 0) document.getElementById('snd-alarm').play().catch(()=>{});
+          } else {
+            timerEl.classList.remove('warning');
+            document.getElementById('time-up-msg').classList.add('hidden');
+          }
+        }
+        lastSecond = remaining;
+      }
+    }, 1000);
+
+    // 通信状態の管理
+    function setLoading(isLoading) {
+      isOperating = isLoading;
+      const overlay = document.getElementById('loading-overlay');
+      if (overlay) {
+        if (isLoading) overlay.classList.remove('hidden');
+        else overlay.classList.add('hidden');
+      }
+    }
+
+    // UI更新処理
+    function updateUI(data) {
+      if (!data || !data.status) return;
+
+      // エラーがサーバーから返ってきた場合
+      if (data.status === 'ERROR') {
+        alert("エラーが発生しました: " + data.message);
+        return;
+      }
+
+      // 1. 全ステータス画面を一旦隠す（重複解消済み！）
+      document.querySelectorAll('div[id^="state-"]').forEach(el => el.classList.add('hidden'));
+      
+      // 2. 現在のステータスの画面を表示
+      const stateId = 'state-' + data.status.toLowerCase();
+      const stateEl = document.getElementById(stateId);
+      if (stateEl) {
+        stateEl.classList.remove('hidden');
+      } else {
+        document.getElementById('state-waiting').classList.remove('hidden');
+      }
+
+      // 権限エラー時
+      if (data.status === 'UNAUTHORIZED') {
+        document.getElementById('user-email').innerText = data.email;
+        return;
+      }
+
+      // データ反映
+      currentState = data.status;
+      targetEndTime = data.endTime;
+
+      document.querySelectorAll('.admin-only').forEach(el => {
+        el.style.display = data.isFacilitator ? 'inline-block' : 'none';
+      });
+      document.querySelectorAll('.user-only').forEach(el => {
+        el.style.display = data.isFacilitator ? 'none' : 'block';
+      });
+
+      // タイトル反映
+      if (data.title) {
+        document.getElementById('game-title').innerText = data.title;
+        document.getElementById('page-title').innerText = data.title;
+      }
+
+      // wolfName 反映
+      if (data.wolfName) {
+        document.getElementById('wolf-count-label').innerText = data.wolfName + 'の数：';
+        document.getElementById('vote-instruction').innerText = data.wolfName + 'だと思う人を選んでください';
+      }
+
+      document.getElementById('my-word').innerText = data.myWord || "???";
+      document.getElementById('my-word-fixed').innerText = data.myWord || "???";
+      document.getElementById('check-count').innerText = data.countStr;
+
+      if (data.status === 'DISTRIBUTING') {
+        const area = document.getElementById('word-area');
+        const display = document.getElementById('word-display');
+        if (data.isChecked) {
+          area.classList.add('hidden');
+          display.classList.remove('hidden');
+        } else {
+          area.classList.remove('hidden');
+          display.classList.add('hidden');
+        }
+      }
+
+      if (data.status === 'VOTING') {
+        const optionsEl = document.getElementById('vote-options');
+        optionsEl.innerHTML = "";
+        data.playerList.forEach(name => {
+          const btn = document.createElement('button');
+          btn.className = "btn" + (data.myVote === name ? "" : " btn-secondary");
+          btn.innerText = name + (data.myVote === name ? " (投票済み)" : "");
+          btn.disabled = !!data.myVote;
+          btn.onclick = () => castVote(name);
+          optionsEl.appendChild(btn);
+        });
+
+        const tallyEl = document.getElementById('vote-tally-list');
+        tallyEl.innerHTML = data.playerList.map(name => {
+          const count = data.voteTallies[name] || 0;
+          return `<div>${name}: ${"●".repeat(count)} (${count}票)</div>`;
+        }).join('');
+      }
+
+      if (data.status === 'REVEALED') {
+        const listEl = document.getElementById('result-list');
+        listEl.innerHTML = data.allResults.map(res => `
+          <div class="result-item ${res.role === data.wolfName ? 'wolf-row' : ''}">
+            [${res.role}] ${res.name} : <b>${res.word}</b><br>
+            <small>投票先: ${res.votedFor || '未投票'}</small>
+          </div>
+        `).join('');
+      }
+    }
+
+    // 定期更新
+    function poll() {
+      if (isOperating) return;
+      google.script.run
+        .withSuccessHandler(data => { if (!isOperating) updateUI(data); })
+        .withFailureHandler(err => console.error("Poll error:", err))
+        .getGameState();
+    }
+
+    // ボタン実行用の関数
+    function run(funcName, ...args) {
+      setLoading(true);
+      google.script.run
+        .withSuccessHandler((data) => {
+          updateUI(data);
+          setTimeout(() => setLoading(false), 300);
+        })
+        .withFailureHandler((err) => {
+          console.error("Run error:", err);
+          alert("通信エラーが発生しました。");
+          setLoading(false);
+        })[funcName](...args);
+    }
+
+    // 各種アクション
+    function showWord() { run('markAsChecked'); }
+    function setupWithWolfCount() {
+      const count = document.getElementById('wolf-count').value;
+      run('setupWords', parseInt(count));
+    }
+    function castVote(name) {
+      if(confirm(name + "さんに投票しますか？")) run('castVote', name);
+    }
+
+    // 初回起動
+    poll();
+    setInterval(poll, 3000);
+  </script>
+</body>
+</html>
