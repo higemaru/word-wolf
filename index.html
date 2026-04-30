@@ -13,22 +13,18 @@
     .btn-secondary { background: #5f6368; }
     .hidden { display: none !important; }
     #timer { font-size: 4em; font-weight: bold; margin: 10px 0; font-variant-numeric: tabular-nums; }
-    
     .warning { color: #ea4335; animation: blink 0.5s infinite; }
     @keyframes blink { 0% { opacity: 1; } 50% { opacity: 0.4; } 100% { opacity: 1; } }
-    
     .result-item { text-align: left; border-bottom: 1px solid #eee; padding: 15px; font-size: 1.1em; }
     .wolf-row { background-color: #fce8e6; color: #ea4335; border-radius: 10px; font-weight: bold; }
     code { background: #eee; padding: 2px 6px; border-radius: 4px; }
     #vote-options .btn { display: block; width: 80%; margin: 10px auto; }
-    
+
     /* 通信中オーバーレイ */
     #loading-overlay {
       position: fixed;
-      top: 0;
-      left: 0;
-      width: 100%;
-      height: 100%;
+      top: 0; left: 0;
+      width: 100%; height: 100%;
       background: rgba(255, 255, 255, 0.6);
       display: flex;
       flex-direction: column;
@@ -38,8 +34,7 @@
       backdrop-filter: blur(2px);
     }
     .spinner {
-      width: 40px;
-      height: 40px;
+      width: 40px; height: 40px;
       border: 4px solid #f3f3f3;
       border-top: 4px solid #1a73e8;
       border-radius: 50%;
@@ -47,13 +42,51 @@
       margin-bottom: 10px;
     }
     @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+
+    /* 確認ダイアログ（loading-overlay と同じ構造）*/
+    #confirm-overlay {
+      position: fixed;
+      top: 0; left: 0;
+      width: 100%; height: 100%;
+      background: rgba(0, 0, 0, 0.4);
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      z-index: 9998;
+      backdrop-filter: blur(2px);
+    }
+    #confirm-dialog {
+      background: white;
+      padding: 30px;
+      border-radius: 20px;
+      max-width: 320px;
+      width: 90%;
+      box-shadow: 0 10px 25px rgba(0,0,0,0.2);
+    }
+    #confirm-message {
+      font-size: 1.1em;
+      margin-bottom: 24px;
+    }
+
     button:disabled { opacity: 0.5; cursor: not-allowed; }
   </style>
 </head>
 <body>
+
+  <!-- 通信中オーバーレイ -->
   <div id="loading-overlay" class="hidden">
     <div class="spinner"></div>
     <div style="font-weight: bold; color: #1a73e8;">処理中...</div>
+  </div>
+
+  <!-- 確認ダイアログ -->
+  <div id="confirm-overlay" class="hidden">
+    <div id="confirm-dialog">
+      <p id="confirm-message"></p>
+      <button class="btn btn-danger" id="confirm-ok">投票する</button>
+      <button class="btn btn-secondary" id="confirm-cancel">キャンセル</button>
+    </div>
   </div>
 
   <h1 id="game-title">ワードウルフ オンライン</h1>
@@ -130,76 +163,196 @@
 
   <script>
     let targetEndTime = null;
-    let currentState = "";
-    let lastSecond = null;
-    let isOperating = false;
+    let currentState  = "";
+    let lastSecond    = null;
+    let isOperating   = false;
 
-    // タイマー制御
+    // ----------------------------------------
+    // ホワイトリスト (#2, #3)
+    // ----------------------------------------
+
+    // run() から呼び出せる GAS 関数を限定する
+    const ALLOWED_FUNCTIONS = new Set([
+      'setupWords', 'markAsChecked', 'castVote',
+      'startGame', 'startVoting', 'revealAnswer', 'resetGame'
+    ]);
+
+    // 有効なゲームステータスを限定する
+    const VALID_STATES = new Set([
+      'loading', 'unauthorized', 'waiting',
+      'distributing', 'started', 'voting', 'revealed'
+    ]);
+
+    // ----------------------------------------
+    // XSS 対策ユーティリティ (#1)
+    // ----------------------------------------
+    function escapeHtml(str) {
+      return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
+    }
+
+    // ----------------------------------------
+    // タイマー
+    // ----------------------------------------
     setInterval(() => {
-      if (currentState === 'STARTED' && targetEndTime) {
-        const now = new Date().getTime();
-        const remaining = Math.max(0, Math.floor((targetEndTime - now) / 1000));
-        const m = Math.floor(remaining / 60);
-        const s = remaining % 60;
-        const timerEl = document.getElementById('timer');
-        if (timerEl) {
-          timerEl.innerText = `${m}:${s.toString().padStart(2, '0')}`;
-          if (remaining <= 10 && remaining > 0) {
-            timerEl.classList.add('warning');
-            if (lastSecond !== remaining) document.getElementById('snd-tick').play().catch(()=>{});
-          } else if (remaining === 0) {
-            timerEl.classList.add('warning');
-            document.getElementById('time-up-msg').classList.remove('hidden');
-            if (lastSecond > 0) document.getElementById('snd-alarm').play().catch(()=>{});
-          } else {
-            timerEl.classList.remove('warning');
-            document.getElementById('time-up-msg').classList.add('hidden');
-          }
-        }
-        lastSecond = remaining;
+      if (currentState !== 'STARTED' || !targetEndTime) return;
+      const now       = new Date().getTime();
+      const remaining = Math.max(0, Math.floor((targetEndTime - now) / 1000));
+      const m = Math.floor(remaining / 60);
+      const s = remaining % 60;
+      const timerEl = document.getElementById('timer');
+      if (!timerEl) return;
+      timerEl.textContent = `${m}:${s.toString().padStart(2, '0')}`; // #4
+      if (remaining <= 10 && remaining > 0) {
+        timerEl.classList.add('warning');
+        if (lastSecond !== remaining) document.getElementById('snd-tick').play().catch(() => {});
+      } else if (remaining === 0) {
+        timerEl.classList.add('warning');
+        document.getElementById('time-up-msg').classList.remove('hidden');
+        if (lastSecond > 0) document.getElementById('snd-alarm').play().catch(() => {});
+      } else {
+        timerEl.classList.remove('warning');
+        document.getElementById('time-up-msg').classList.add('hidden');
       }
+      lastSecond = remaining;
     }, 1000);
 
-    // 通信状態の管理
+    // ----------------------------------------
+    // 通信中オーバーレイ
+    // ----------------------------------------
     function setLoading(isLoading) {
       isOperating = isLoading;
       const overlay = document.getElementById('loading-overlay');
-      if (overlay) {
-        if (isLoading) overlay.classList.remove('hidden');
-        else overlay.classList.add('hidden');
+      if (isLoading) overlay.classList.remove('hidden');
+      else           overlay.classList.add('hidden');
+    }
+
+    // ----------------------------------------
+    // 確認ダイアログ
+    // ----------------------------------------
+    function showConfirm(message, onOk) {
+      const overlay = document.getElementById('confirm-overlay');
+      document.getElementById('confirm-message').textContent = message; // #4
+      overlay.classList.remove('hidden');
+
+      document.getElementById('confirm-ok').onclick = () => {
+        overlay.classList.add('hidden');
+        onOk();
+      };
+      document.getElementById('confirm-cancel').onclick = () => {
+        overlay.classList.add('hidden');
+      };
+    }
+
+    // ----------------------------------------
+    // 状態別描画関数 (#5)
+    // ----------------------------------------
+    function renderDistributing(data) {
+      const area    = document.getElementById('word-area');
+      const display = document.getElementById('word-display');
+      if (data.isChecked) {
+        area.classList.add('hidden');
+        display.classList.remove('hidden');
+      } else {
+        area.classList.remove('hidden');
+        display.classList.add('hidden');
       }
     }
 
-    // UI更新処理
+    function renderVoting(data) {
+      // 投票ボタン
+      const optionsEl = document.getElementById('vote-options');
+      optionsEl.innerHTML = "";
+      data.playerList.forEach(name => {
+        const btn = document.createElement('button');
+        btn.className   = "btn" + (data.myVote === name ? "" : " btn-secondary");
+        btn.textContent = name + (data.myVote === name ? " (投票済み)" : ""); // #4
+        btn.disabled    = !!data.myVote;
+        btn.onclick     = () => castVote(name);
+        optionsEl.appendChild(btn);
+      });
+
+      // 得票数（DOM 操作で XSS 回避）(#1)
+      const tallyEl = document.getElementById('vote-tally-list');
+      tallyEl.innerHTML = "";
+      data.playerList.forEach(name => {
+        const count = data.voteTallies[name] || 0;
+        const div = document.createElement('div');
+        div.textContent = `${name}: ${"●".repeat(count)} (${count}票)`; // #4
+        tallyEl.appendChild(div);
+      });
+    }
+
+    function renderRevealed(data) {
+      // 結果一覧（DOM 操作で XSS 回避）(#1)
+      const listEl = document.getElementById('result-list');
+      listEl.innerHTML = "";
+      data.allResults.forEach(res => {
+        const isWolf = res.role === data.wolfName;
+
+        const div = document.createElement('div');
+        div.className = 'result-item' + (isWolf ? ' wolf-row' : '');
+
+        const main = document.createElement('span');
+        main.textContent = `[${res.role}] ${res.name} : ${res.word}`; // #4
+
+        const bold = document.createElement('b');
+        bold.textContent = res.word; // #4
+        // "name : word" の word 部分だけ bold にする
+        main.textContent = `[${res.role}] ${res.name} : `;
+        main.appendChild(bold);
+
+        const small = document.createElement('small');
+        small.textContent = `投票先: ${res.votedFor || '未投票'}`; // #4
+
+        div.appendChild(main);
+        div.appendChild(document.createElement('br'));
+        div.appendChild(small);
+        listEl.appendChild(div);
+      });
+    }
+
+    // 状態 → 描画関数のマッピング (#5)
+    const STATE_RENDERERS = {
+      DISTRIBUTING: renderDistributing,
+      VOTING:       renderVoting,
+      REVEALED:     renderRevealed,
+    };
+
+    // ----------------------------------------
+    // UI 更新
+    // ----------------------------------------
     function updateUI(data) {
       if (!data || !data.status) return;
 
-      // エラーがサーバーから返ってきた場合
       if (data.status === 'ERROR') {
         alert("エラーが発生しました: " + data.message);
         return;
       }
 
-      // 1. 全ステータス画面を一旦隠す（重複解消済み！）
-      document.querySelectorAll('div[id^="state-"]').forEach(el => el.classList.add('hidden'));
-      
-      // 2. 現在のステータスの画面を表示
-      const stateId = 'state-' + data.status.toLowerCase();
-      const stateEl = document.getElementById(stateId);
-      if (stateEl) {
-        stateEl.classList.remove('hidden');
-      } else {
-        document.getElementById('state-waiting').classList.remove('hidden');
-      }
-
-      // 権限エラー時
-      if (data.status === 'UNAUTHORIZED') {
-        document.getElementById('user-email').innerText = data.email;
+      // 有効なステータスかチェック (#3)
+      const stateKey = data.status.toLowerCase();
+      if (!VALID_STATES.has(stateKey)) {
+        console.error("不正なステータス:", data.status);
         return;
       }
 
-      // データ反映
-      currentState = data.status;
+      document.querySelectorAll('div[id^="state-"]').forEach(el => el.classList.add('hidden'));
+
+      const stateEl = document.getElementById('state-' + stateKey);
+      if (stateEl) stateEl.classList.remove('hidden');
+      else         document.getElementById('state-waiting').classList.remove('hidden');
+
+      if (data.status === 'UNAUTHORIZED') {
+        document.getElementById('user-email').textContent = data.email; // #4
+        return;
+      }
+
+      currentState  = data.status;
       targetEndTime = data.endTime;
 
       document.querySelectorAll('.admin-only').forEach(el => {
@@ -209,65 +362,26 @@
         el.style.display = data.isFacilitator ? 'none' : 'block';
       });
 
-      // タイトル反映
       if (data.title) {
-        document.getElementById('game-title').innerText = data.title;
-        document.getElementById('page-title').innerText = data.title;
+        document.getElementById('game-title').textContent = data.title; // #4
+        document.getElementById('page-title').textContent = data.title; // #4
       }
-
-      // wolfName 反映
       if (data.wolfName) {
-        document.getElementById('wolf-count-label').innerText = data.wolfName + 'の数：';
-        document.getElementById('vote-instruction').innerText = data.wolfName + 'だと思う人を選んでください';
+        document.getElementById('wolf-count-label').textContent = data.wolfName + 'の数：'; // #4
+        document.getElementById('vote-instruction').textContent = data.wolfName + 'だと思う人を選んでください'; // #4
       }
 
-      document.getElementById('my-word').innerText = data.myWord || "???";
-      document.getElementById('my-word-fixed').innerText = data.myWord || "???";
-      document.getElementById('check-count').innerText = data.countStr;
+      document.getElementById('my-word').textContent       = data.myWord || "???"; // #4
+      document.getElementById('my-word-fixed').textContent = data.myWord || "???"; // #4
+      document.getElementById('check-count').textContent   = data.countStr;        // #4
 
-      if (data.status === 'DISTRIBUTING') {
-        const area = document.getElementById('word-area');
-        const display = document.getElementById('word-display');
-        if (data.isChecked) {
-          area.classList.add('hidden');
-          display.classList.remove('hidden');
-        } else {
-          area.classList.remove('hidden');
-          display.classList.add('hidden');
-        }
-      }
-
-      if (data.status === 'VOTING') {
-        const optionsEl = document.getElementById('vote-options');
-        optionsEl.innerHTML = "";
-        data.playerList.forEach(name => {
-          const btn = document.createElement('button');
-          btn.className = "btn" + (data.myVote === name ? "" : " btn-secondary");
-          btn.innerText = name + (data.myVote === name ? " (投票済み)" : "");
-          btn.disabled = !!data.myVote;
-          btn.onclick = () => castVote(name);
-          optionsEl.appendChild(btn);
-        });
-
-        const tallyEl = document.getElementById('vote-tally-list');
-        tallyEl.innerHTML = data.playerList.map(name => {
-          const count = data.voteTallies[name] || 0;
-          return `<div>${name}: ${"●".repeat(count)} (${count}票)</div>`;
-        }).join('');
-      }
-
-      if (data.status === 'REVEALED') {
-        const listEl = document.getElementById('result-list');
-        listEl.innerHTML = data.allResults.map(res => `
-          <div class="result-item ${res.role === data.wolfName ? 'wolf-row' : ''}">
-            [${res.role}] ${res.name} : <b>${res.word}</b><br>
-            <small>投票先: ${res.votedFor || '未投票'}</small>
-          </div>
-        `).join('');
-      }
+      // 状態別描画 (#5)
+      STATE_RENDERERS[data.status]?.(data);
     }
 
-    // 定期更新
+    // ----------------------------------------
+    // ポーリング
+    // ----------------------------------------
     function poll() {
       if (isOperating) return;
       google.script.run
@@ -276,32 +390,44 @@
         .getGameState();
     }
 
-    // ボタン実行用の関数
+    // ----------------------------------------
+    // GAS 関数呼び出し（ホワイトリスト制限）(#2)
+    // ----------------------------------------
     function run(funcName, ...args) {
+      if (!ALLOWED_FUNCTIONS.has(funcName)) {
+        console.error("許可されていない関数呼び出し:", funcName);
+        return;
+      }
       setLoading(true);
       google.script.run
-        .withSuccessHandler((data) => {
+        .withSuccessHandler(data => {
           updateUI(data);
           setTimeout(() => setLoading(false), 300);
         })
-        .withFailureHandler((err) => {
+        .withFailureHandler(err => {
           console.error("Run error:", err);
           alert("通信エラーが発生しました。");
           setLoading(false);
         })[funcName](...args);
     }
 
-    // 各種アクション
+    // ----------------------------------------
+    // アクション
+    // ----------------------------------------
     function showWord() { run('markAsChecked'); }
+
     function setupWithWolfCount() {
       const count = document.getElementById('wolf-count').value;
       run('setupWords', parseInt(count));
     }
+
     function castVote(name) {
-      if(confirm(name + "さんに投票しますか？")) run('castVote', name);
+      showConfirm(`${name}さんに投票しますか？`, () => run('castVote', name));
     }
 
-    // 初回起動
+    // ----------------------------------------
+    // 起動
+    // ----------------------------------------
     poll();
     setInterval(poll, 3000);
   </script>
