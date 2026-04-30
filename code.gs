@@ -168,11 +168,12 @@ function buildUserState(cache, email) {
     title,
     wolfName,
     citizenName,
-    myWord:        userData.word,
-    isChecked:     userData.checked,
-    isFacilitator: userData.isFacilitator,
-    myVote:        userData.vote || null,
-    countStr:      `${checkedCount} / ${playerCount}`,
+    myWord:         userData.word,
+    isChecked:      userData.checked,
+    isFacilitator:  userData.isFacilitator,
+    hasFacilitator: players.some(p => p.isFacilitator),
+    myVote:         userData.vote || null,
+    countStr:       `${checkedCount} / ${playerCount}`,
     allResults,
     playerList,
     voteTallies
@@ -386,18 +387,87 @@ function revealAnswer() {
 }
 
 /**
+ * キャッシュを強制的に再構築する
+ * スプレッドシートを手動編集した後に使う
+ */
+function refreshCache() {
+  try {
+    return buildUserState(rebuildCache(), Session.getActiveUser().getEmail());
+  } catch(e) {
+    return { status: 'ERROR', message: e.message };
+  }
+}
+
+/**
+ * 進行役をランダムに決定する
+ * ファシリテーターがいない場合は誰でも実行可能
+ * ファシリテーターがいる場合は現ファシリテーターのみ実行可能（再抽選）
+ */
+function assignFacilitator() {
+  const email = Session.getActiveUser().getEmail();
+  const lock = LockService.getScriptLock();
+  try {
+    lock.waitLock(10000);
+
+    const cache = getCache();
+    assertState(cache, 'WAITING');
+
+    if (cache.players.length === 0) throw new Error("有効なプレイヤーが1人も参加していません。");
+
+    // ファシリテーターがいる場合は現ファシリテーターのみ再抽選可能
+    const hasFacilitator = cache.players.some(p => p.isFacilitator);
+    if (hasFacilitator) assertFacilitator(email, cache);
+
+    // 現在のファシリテーター数を維持（0人なら1人）
+    const currentCount     = cache.players.filter(p => p.isFacilitator).length;
+    const facilitatorCount = currentCount > 0 ? currentCount : 1;
+
+    // ランダムに抽選
+    const indices           = cache.players.map((_, i) => i);
+    const facilitatorIndices = [];
+    for (let i = 0; i < facilitatorCount; i++) {
+      if (indices.length === 0) break;
+      const r = Math.floor(Math.random() * indices.length);
+      facilitatorIndices.push(indices.splice(r, 1)[0]);
+    }
+
+    // Players シートの G 列を全員分書き込む
+    const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Players');
+    cache.players.forEach((player, i) => {
+      sheet.getRange(player.sheetRow, 7).setValue(facilitatorIndices.includes(i));
+    });
+
+  } catch(e) {
+    return { status: 'ERROR', message: e.message };
+  } finally {
+    lock.releaseLock();
+  }
+
+  return buildUserState(rebuildCache(), email);
+}
+
+/**
  * ゲームをリセットする
+ * WAITING フェーズは誰でも実行可能（ファシリテーター退席時の保険）
+ * それ以外のフェーズはファシリテーターのみ
  */
 function resetGame() {
+  const email = Session.getActiveUser().getEmail();
   try {
-    return facilitatorTransition(null, ss => {
-      ss.getSheetByName('Config').getRange('A2:B2').setValues([['WAITING', null]]);
-      const playerSheet = ss.getSheetByName('Players');
-      const lastRow = playerSheet.getLastRow();
-      if (lastRow > 1) {
-        playerSheet.getRange(2, 3, lastRow - 1, 4).clearContent();
-      }
-    });
+    const cache = getCache();
+    if (cache.status !== 'WAITING') {
+      assertFacilitator(email, cache);
+    }
+
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    ss.getSheetByName('Config').getRange('A2:B2').setValues([['WAITING', null]]);
+    const playerSheet = ss.getSheetByName('Players');
+    const lastRow = playerSheet.getLastRow();
+    if (lastRow > 1) {
+      playerSheet.getRange(2, 3, lastRow - 1, 4).clearContent();
+    }
+
+    return buildUserState(rebuildCache(), email);
   } catch(e) {
     return { status: 'ERROR', message: e.message };
   }

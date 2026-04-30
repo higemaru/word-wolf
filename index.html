@@ -104,6 +104,8 @@
 
   <div id="state-waiting" class="hidden card">
     <p>全員が集まるまでお待ちください</p>
+    <button class="btn btn-secondary" id="assign-facilitator-btn" onclick="run('assignFacilitator')">進行役をランダムに決める</button>
+    <hr>
     <div class="admin-only" style="margin-bottom: 10px;">
       <label for="wolf-count" id="wolf-count-label">人狼の数：</label>
       <select id="wolf-count" style="padding: 5px; border-radius: 5px;">
@@ -114,6 +116,11 @@
     </div>
     <button class="btn admin-only" onclick="setupWithWolfCount()">お題を配布する</button>
     <p class="user-only" style="color:#666;">進行役が準備しています...</p>
+    <hr>
+    <button class="btn btn-secondary" onclick="run('resetGame')">🔄 最初からやりなおす</button>
+    <button class="btn btn-secondary admin-only"
+            style="font-size:12px; padding:6px 12px; min-width:auto;"
+            onclick="run('refreshCache')">🛠 キャッシュ再構築</button>
   </div>
 
   <div id="state-distributing" class="hidden card">
@@ -175,7 +182,8 @@
     // run() から呼び出せる GAS 関数を限定する
     const ALLOWED_FUNCTIONS = new Set([
       'setupWords', 'markAsChecked', 'castVote',
-      'startGame', 'startVoting', 'revealAnswer', 'resetGame'
+      'startGame', 'startVoting', 'revealAnswer', 'resetGame',
+      'assignFacilitator', 'refreshCache'
     ]);
 
     // 有効なゲームステータスを限定する
@@ -362,6 +370,12 @@
       document.querySelectorAll('.user-only').forEach(el => {
         el.style.display = data.isFacilitator ? 'none' : 'block';
       });
+
+      // 抽選ボタン：ファシリテーター未設定なら全員に、設定済みならファシリテーターのみに表示
+      const assignBtn = document.getElementById('assign-facilitator-btn');
+      if (assignBtn) {
+        assignBtn.style.display = (!data.hasFacilitator || data.isFacilitator) ? 'inline-block' : 'none';
+      }
 
       if (data.title) {
         document.getElementById('game-title').textContent = data.title; // #4
