@@ -85,12 +85,13 @@ function rebuildCache() {
     throw new Error("シート「Config」または「Players」が見つかりません。");
   }
 
-  const configValues = configSheet.getRange('A2:F2').getValues()[0];
+  const configValues = configSheet.getRange('A2:G2').getValues()[0];
   const status    = configValues[0] || 'WAITING';
   const startTime = configValues[1];
   const title       = configValues[3] || 'ワードウルフ オンライン';
   const wolfName    = configValues[4] || '人狼';
   const citizenName = configValues[5] || '村人';
+  const wolfKnows   = configValues[6] === true;
 
   // Limitの評価は1回だけ行う (#3)
   const rawLimit = configValues[2];
@@ -128,7 +129,7 @@ function rebuildCache() {
     });
   }
 
-  const cache = { status, endTime, title, wolfName, citizenName, players };
+  const cache = { status, endTime, title, wolfName, citizenName, wolfKnows, players };
   PropertiesService.getScriptProperties()
     .setProperty(STATE_CACHE_KEY, JSON.stringify(cache));
 
@@ -139,7 +140,7 @@ function rebuildCache() {
  * キャッシュからユーザー向けのゲーム状態を生成して返す
  */
 function buildUserState(cache, email) {
-  const { status, endTime, title, wolfName, citizenName, players } = cache;
+  const { status, endTime, title, wolfName, citizenName, wolfKnows, players } = cache;
 
   const userData = players.find(p => p.email === email);
   if (!userData) return { status: 'UNAUTHORIZED', email };
@@ -168,7 +169,9 @@ function buildUserState(cache, email) {
     title,
     wolfName,
     citizenName,
+    wolfKnows,
     myWord:         userData.word,
+    myRole:         userData.role,
     isChecked:      userData.checked,
     isFacilitator:  userData.isFacilitator,
     hasFacilitator: players.some(p => p.isFacilitator),

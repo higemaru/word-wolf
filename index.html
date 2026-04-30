@@ -128,6 +128,7 @@
       <button class="btn" onclick="showWord()">ワードを確認する</button>
     </div>
     <div id="word-display" class="hidden">
+      <p id="my-role-notice" style="font-size:1.1em; font-weight:bold;"></p>
       あなたのワードは:<br>
       <h2 id="my-word" style="color: #1a73e8;"></h2>
       <p style="font-size: 0.9em; color:#666;">確認済み人数: <span id="check-count"></span></p>
@@ -266,6 +267,16 @@
       if (data.isChecked) {
         area.classList.add('hidden');
         display.classList.remove('hidden');
+
+        // 役職表示（wolfKnows が true のときのみ）
+        const roleNotice = document.getElementById('my-role-notice');
+        if (data.wolfKnows && data.myRole) {
+          const isWolf = data.myRole === data.wolfName;
+          roleNotice.textContent = `あなたは ${data.myRole} です${isWolf ? '！' : '。'}`;
+          roleNotice.style.color = isWolf ? '#ea4335' : '#1a73e8';
+        } else {
+          roleNotice.textContent = '';
+        }
       } else {
         area.classList.remove('hidden');
         display.classList.add('hidden');
