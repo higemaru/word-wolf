@@ -1,3 +1,11 @@
+/**
+ * Word Wolf Online
+ * https://github.com/higemaru/word-wolf
+ *
+ * Copyright (C) 2026 by KAWABATA, Kazumichi
+ * SPDX-License-Identifier: 0BSD
+ */
+
 const STATE_CACHE_KEY = 'gameStateCache';
 
 /**
