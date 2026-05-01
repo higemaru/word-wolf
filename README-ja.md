@@ -8,13 +8,14 @@ Google スプレッドシート + GAS のワードウルフサンプル
 
 ### Config
 
-| Status | StartTime| Limit| Title | WoflName | CitizenName |
-| ------ | -------- | ---- | ----- | -------- | ----------- |
-|      |      | 300 |ワードウルフ オンライン|人狼|村人|
+| Status | StartTime| Limit| Title | WoflName | CitizenName | WolfKnows |
+| ------ | -------- | ---- | ----- | -------- | ----------- | ----------- |
+|      |      | 300 |ワードウルフ オンライン|人狼|村人|false|
 
 - Status, StartTime … システムが利用
-- 話し合い時間。指定しないと 300秒
+- Limite … 話し合い時間。指定しないと 300秒
 - Title, WorlName, CitizenName … 入力した文字がゲーム中で使われます
+- WolfKnows … ワード配布時、合わせて自分の役割も表示するかどうか。デフォルトは非表示
 
 ### Words
 

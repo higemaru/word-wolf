@@ -8,13 +8,14 @@ Create the following sheet.
 
 ### Config
 
-| Status | StartTime| Limit| Title | WoflName | CitizenName |
-| ------ | -------- | ---- | ----- | -------- | ----------- |
-|      |      | 300 |ワードウルフ オンライン|人狼|村人|
+| Status | StartTime| Limit| Title | WoflName | CitizenName | WolfKnows |
+| ------ | -------- | ---- | ----- | -------- | ----------- | ----------- |
+|      |      | 300 |ワードウルフ オンライン|人狼|村人|false|
 
 - Status, StartTime … for system
 - Time for discussion. default: 300 sec
 - Title, WorlName, CitizenName … Text will be used in the game.
+- WolfKnows …  Whether to display your role. default: hidden.
 
 ### Words
 
